@@ -62,6 +62,15 @@ struct fb_context_t {
     framebuffer_device_t  device;
 };
 
+#define FORCE_HW_VSYNC
+
+#ifdef FORCE_HW_VSYNC
+static int fb_force_vsync(int fd)
+{
+    unsigned int e = 1;
+    return ioctl(fd, MSMFB_OVERLAY_VSYNC_CTRL, &e);
+}
+#endif
 
 static int fb_setSwapInterval(struct framebuffer_device_t* dev,
                               int interval)
@@ -132,6 +141,13 @@ static int fb_post(struct framebuffer_device_t* dev, buffer_handle_t buffer)
             return -errno;
         }
 
+#ifdef FORCE_HW_VSYNC
+        if (fb_force_vsync(m->framebuffer->fd) == -1) {
+            ALOGE("MSMFB_OVERLAY_VSYNC_CTRL failed");
+            return -errno;
+        }
+#endif
+
         //Signals the composition thread to unblock and loop over if necessary
         pthread_mutex_lock(&m->fbPanLock);
         m->fbPanDone = true;
@@ -152,6 +168,7 @@ static int fb_post(struct framebuffer_device_t* dev, buffer_handle_t buffer)
 static int fb_compositionComplete(struct framebuffer_device_t* dev)
 {
     // TODO: Properly implement composition complete callback
+    glFinish();
 
     return 0;
 }
@@ -187,6 +204,13 @@ int mapFrameBufferLocked(struct private_module_t* module)
     struct fb_var_screeninfo info;
     if (ioctl(fd, FBIOGET_VSCREENINFO, &info) == -1)
         return -errno;
+
+#ifdef FORCE_HW_VSYNC
+        if (fb_force_vsync(fd) == -1) {
+            ALOGE("MSMFB_OVERLAY_VSYNC_CTRL failed");
+            return -errno;
+        }
+#endif
 
     info.reserved[0] = 0;
     info.reserved[1] = 0;
@@ -296,8 +320,8 @@ int mapFrameBufferLocked(struct private_module_t* module)
 
     float xdpi = (info.xres * 25.4f) / info.width;
     float ydpi = (info.yres * 25.4f) / info.height;
-    //The reserved[3] field is used to store FPS by the driver.
-    float fps  = info.reserved[3] & 0xFF;
+    //The reserved[4] field is used to store FPS by the driver.
+    float fps  = info.reserved[4];
 
     ALOGI("using (fd=%d)\n"
           "id           = %s\n"
